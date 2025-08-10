@@ -1,9 +1,11 @@
 import os
 import logging
+import toml
 from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 import gitlab
+import fnmatch
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -19,6 +21,16 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+# Load configuration from TOML file
+try:
+    with open("config.toml", "r") as f:
+        config = toml.load(f)
+except FileNotFoundError:
+    config = {}
+except Exception as e:
+    logging.error(f"Error loading config.toml: {e}")
+    config = {}
 
 @asynccontextmanager
 async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[gitlab.Gitlab]:
@@ -49,6 +61,16 @@ mcp = FastMCP(
     lifespan=gitlab_lifespan,
     dependencies=["python-dotenv", "requests", "python-gitlab"]
 )
+
+def is_path_excluded(file_path: str, patterns: List[str]) -> bool:
+    """Check if a file path matches any of the exclusion patterns."""
+    for pattern in patterns:
+        if pattern.endswith('/'):
+            if file_path.startswith(pattern) or f"/{pattern}" in file_path:
+                return True
+        elif fnmatch.fnmatch(file_path, pattern):
+            return True
+    return False
 
 @mcp.tool()
 def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -> Dict[str, Any]:
@@ -82,17 +104,13 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -
     # 获取并过滤 changes
     original_changes_data = mr.changes()
     all_changes = original_changes_data.get("changes", [])
-    
-    # 定义要忽略的前端文件扩展名
-    frontend_extensions = {
-        '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.less', '.html', '.vue',
-        '.svelte', '.md', '.json', '.yml', '.yaml', '.xml', '.svg', '.png', '.jpg', '.jpeg', '.gif'
-    }
+
+    exclude_patterns = config.get("exclude_patterns", [])
 
     filtered_changes_list = []
     for change in all_changes:
         file_path = change.get("new_path")
-        if not any(file_path.endswith(ext) for ext in frontend_extensions):
+        if not is_path_excluded(file_path, exclude_patterns):
             slim_change = {
                 "new_path": change.get("new_path"),
                 "old_path": change.get("old_path"),

@@ -1,0 +1,20 @@
+# CodeReview时忽略这些文件
+exclude_patterns = [
+    # 前端
+    "*.js",
+    "*.jsx",
+    "*.ts",
+    "*.tsx",
+    "*.css",
+    "*.scss",
+    "*.less",
+    "*.html",
+    "*.vue",
+    "*.svelte",
+    "*.svg",
+    "*.png",
+    "*.jpg",
+    "*.jpeg",
+    "*.gif",
+    "*.jar"
+]

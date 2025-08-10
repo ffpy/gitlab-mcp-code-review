@@ -16,6 +16,7 @@ classifiers = [
 dependencies = [
     "mcp[cli]>=1.6.0",
     "python-dotenv>=1.0.0",
+    "python-gitlab>=6.2.0",
     "requests>=2.31.0",
 ]
 

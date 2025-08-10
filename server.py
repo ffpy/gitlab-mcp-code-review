@@ -1,13 +1,9 @@
 import os
-import json
 import logging
-from typing import Optional, Dict, Any, Union, List
-from dataclasses import dataclass
+from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
-from urllib.parse import quote
-import requests
-
+import gitlab
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -18,59 +14,8 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-@dataclass
-class GitLabContext:
-    host: str
-    token: str
-    api_version: str = "v4"
-
-def make_gitlab_api_request(ctx: Context, endpoint: str, method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Any:
-    """Make a REST API request to GitLab and handle the response"""
-    gitlab_ctx = ctx.request_context.lifespan_context
-    
-    if not gitlab_ctx.token:
-        logger.error("GitLab token not set in context")
-        raise ValueError("GitLab token not set. Please set GITLAB_TOKEN in your environment.")
-    
-    url = f"https://{gitlab_ctx.host}/api/{gitlab_ctx.api_version}/{endpoint}"
-    headers = {
-        'Accept': 'application/json',
-        'User-Agent': 'GitLabMCPCodeReview/1.0',
-        'Private-Token': gitlab_ctx.token
-    }
-    
-    try:
-        if method.upper() == "GET":
-            response = requests.get(url, headers=headers, verify=True)
-        elif method.upper() == "POST":
-            response = requests.post(url, headers=headers, json=data, verify=True)
-        else:
-            raise ValueError(f"Unsupported HTTP method: {method}")
-        
-        if response.status_code == 401:
-            logger.error("Authentication failed. Check your GitLab token.")
-            raise Exception("Authentication failed. Please check your GitLab token.")
-            
-        response.raise_for_status()
-        
-        if not response.content:
-            return {}
-            
-        try:
-            return response.json()
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response: {str(e)}")
-            raise Exception(f"Failed to parse GitLab response as JSON: {str(e)}")
-            
-    except requests.exceptions.RequestException as e:
-        logger.error(f"REST request failed: {str(e)}")
-        if hasattr(e, 'response') and e.response is not None:
-            logger.error(f"Response status: {e.response.status_code}")
-            logger.error(f"Response body: {e.response.text}")
-        return {}
-
 @asynccontextmanager
-async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[GitLabContext]:
+async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[gitlab.Gitlab]:
     """Manage GitLab connection details"""
     host = os.getenv("GITLAB_HOST", "gitlab.com")
     token = os.getenv("GITLAB_TOKEN", "")
@@ -82,17 +27,21 @@ async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[GitLabContext]:
             "Please set this in your environment or .env file."
         )
     
-    ctx = GitLabContext(host=host, token=token)
+    gl = gitlab.Gitlab(f"https://{host}", private_token=token)
     try:
-        yield ctx
+        logger.info("GitLab client initialized")
+        yield gl
+    except Exception as e:
+        logger.error(f"An error occurred during GitLab client initialization: {e}")
+        raise
     finally:
-        pass
+        logger.info("GitLab client session closed.")
 
 # Create MCP server
 mcp = FastMCP(
     "GitLab MCP for Code Review",
     lifespan=gitlab_lifespan,
-    dependencies=["python-dotenv", "requests"]
+    dependencies=["python-dotenv", "requests", "python-gitlab"]
 )
 
 @mcp.tool()
@@ -106,30 +55,15 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -
     Returns:
         Dict containing the merge request information
     """
-    # Get merge request details
-    mr_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}"
-    mr_info = make_gitlab_api_request(ctx, mr_endpoint)
-    
-    if not mr_info:
-        raise ValueError(f"Merge request {merge_request_iid} not found in project {project_id}")
-    
-    # Get the changes (diffs) for this merge request
-    changes_endpoint = f"{mr_endpoint}/changes"
-    changes_info = make_gitlab_api_request(ctx, changes_endpoint)
-    
-    # Get the commit information
-    commits_endpoint = f"{mr_endpoint}/commits"
-    commits_info = make_gitlab_api_request(ctx, commits_endpoint)
-    
-    # Get the notes (comments) for this merge request
-    notes_endpoint = f"{mr_endpoint}/notes"
-    notes_info = make_gitlab_api_request(ctx, notes_endpoint)
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
     
     return {
-        "merge_request": mr_info,
-        "changes": changes_info,
-        "commits": commits_info,
-        "notes": notes_info
+        "merge_request": mr.asdict(),
+        "changes": mr.changes(),
+        "commits": [c.asdict() for c in mr.commits(all=True)],
+        "notes": [n.asdict() for n in mr.notes.list(all=True)]
     }
 
 @mcp.tool()
@@ -144,22 +78,18 @@ def fetch_merge_request_diff(ctx: Context, project_id: str, merge_request_iid: s
     Returns:
         Dict containing the diff information
     """
-    # Get the changes for this merge request
-    changes_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/changes"
-    changes_info = make_gitlab_api_request(ctx, changes_endpoint)
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
     
-    if not changes_info:
-        raise ValueError(f"Changes not found for merge request {merge_request_iid}")
+    changes = mr.changes()
+    files = changes.get("changes", [])
     
-    # Extract all changes
-    files = changes_info.get("changes", [])
-    
-    # Filter by file path if specified
     if file_path:
         files = [f for f in files if f.get("new_path") == file_path or f.get("old_path") == file_path]
         if not files:
             raise ValueError(f"File '{file_path}' not found in the merge request changes")
-    
+            
     return {
         "merge_request_iid": merge_request_iid,
         "files": files
@@ -177,25 +107,23 @@ def fetch_commit_diff(ctx: Context, project_id: str, commit_sha: str, file_path:
     Returns:
         Dict containing the diff information
     """
-    # Get the diff for this commit
-    diff_endpoint = f"projects/{quote(project_id, safe='')}/repository/commits/{commit_sha}/diff"
-    diff_info = make_gitlab_api_request(ctx, diff_endpoint)
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    commit = project.commits.get(commit_sha)
     
-    if not diff_info:
-        raise ValueError(f"Diff not found for commit {commit_sha}")
+    try:
+        diff_info = commit.diff()
+    except Exception as e:
+        logger.error(f"Failed to get diff for commit {commit_sha}: {e}")
+        diff_info = []
     
-    # Filter by file path if specified
     if file_path:
         diff_info = [d for d in diff_info if d.get("new_path") == file_path or d.get("old_path") == file_path]
         if not diff_info:
             raise ValueError(f"File '{file_path}' not found in the commit diff")
-    
-    # Get the commit details
-    commit_endpoint = f"projects/{quote(project_id, safe='')}/repository/commits/{commit_sha}"
-    commit_info = make_gitlab_api_request(ctx, commit_endpoint)
-    
+            
     return {
-        "commit": commit_info,
+        "commit": commit.asdict(),
         "diffs": diff_info
     }
 
@@ -211,14 +139,16 @@ def compare_versions(ctx: Context, project_id: str, from_sha: str, to_sha: str) 
     Returns:
         Dict containing the comparison information
     """
-    # Compare the versions
-    compare_endpoint = f"projects/{quote(project_id, safe='')}/repository/compare?from={quote(from_sha, safe='')}&to={quote(to_sha, safe='')}"
-    compare_info = make_gitlab_api_request(ctx, compare_endpoint)
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
     
-    if not compare_info:
-        raise ValueError(f"Comparison failed between {from_sha} and {to_sha}")
+    try:
+        result = project.repository_compare(from_sha, to_sha)
+    except Exception as e:
+        logger.error(f"Failed to compare {from_sha} and {to_sha}: {e}")
+        result = {}
     
-    return compare_info
+    return result
 
 @mcp.tool()
 def add_merge_request_comment(ctx: Context, project_id: str, merge_request_iid: str, body: str) -> Dict[str, Any]:
@@ -232,19 +162,13 @@ def add_merge_request_comment(ctx: Context, project_id: str, merge_request_iid: 
     Returns:
         Dict containing the created comment information
     """
-    # Create the comment data
-    data = {
-        "body": body
-    }
-
-    # Add the comment
-    comment_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/notes"
-    comment_info = make_gitlab_api_request(ctx, comment_endpoint, method="POST", data=data)
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
     
-    if not comment_info:
-        raise ValueError("Failed to add comment to merge request")
+    note = mr.notes.create({'body': body})
     
-    return comment_info
+    return note.asdict()
 
 @mcp.tool()
 def add_merge_request_discussion(ctx: Context, project_id: str, merge_request_iid: str, body: str, position: Dict[str, Any]) -> Dict[str, Any]:
@@ -269,20 +193,13 @@ def add_merge_request_discussion(ctx: Context, project_id: str, merge_request_ii
     Returns:
         Dict containing the created discussion information
     """
-    # Create the discussion data
-    data = {
-        "body": body,
-        "position": position
-    }
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
     
-    # Add the discussion
-    discussion_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/discussions"
-    discussion_info = make_gitlab_api_request(ctx, discussion_endpoint, method="POST", data=data)
+    discussion = mr.discussions.create({'body': body, 'position': position})
     
-    if not discussion_info:
-        raise ValueError("Failed to add discussion to merge request")
-    
-    return discussion_info
+    return discussion.asdict()
 
 @mcp.tool()
 def approve_merge_request(ctx: Context, project_id: str, merge_request_iid: str, approvals_required: Optional[int] = None) -> Dict[str, Any]:
@@ -296,19 +213,16 @@ def approve_merge_request(ctx: Context, project_id: str, merge_request_iid: str,
     Returns:
         Dict containing the approval information
     """
-    # Approve the merge request
-    approve_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/approve"
-    approve_info = make_gitlab_api_request(ctx, approve_endpoint, method="POST")
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
     
-    # Set required approvals if specified
+    mr.approve()
+    
     if approvals_required is not None:
-        approvals_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/approvals"
-        data = {
-            "approvals_required": approvals_required
-        }
-        make_gitlab_api_request(ctx, approvals_endpoint, method="POST", data=data)
-    
-    return approve_info
+        mr.approvals.post({'approvals_required': approvals_required})
+        
+    return mr.asdict()
 
 @mcp.tool()
 def unapprove_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -> Dict[str, Any]:
@@ -321,11 +235,16 @@ def unapprove_merge_request(ctx: Context, project_id: str, merge_request_iid: st
     Returns:
         Dict containing the unapproval information
     """
-    # Unapprove the merge request
-    unapprove_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/unapprove"
-    unapprove_info = make_gitlab_api_request(ctx, unapprove_endpoint, method="POST")
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
     
-    return unapprove_info
+    try:
+        mr.unapprove()
+    except Exception as e:
+        logger.error(f"Failed to unapprove merge request {merge_request_iid}: {e}")
+    
+    return mr.asdict()
 
 @mcp.tool()
 def get_project_merge_requests(ctx: Context, project_id: str, state: str = "all", limit: int = 20) -> List[Dict[str, Any]]:
@@ -339,14 +258,12 @@ def get_project_merge_requests(ctx: Context, project_id: str, state: str = "all"
     Returns:
         List of merge request objects
     """
-    # Get the merge requests
-    mrs_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests?state={state}&per_page={limit}"
-    mrs_info = make_gitlab_api_request(ctx, mrs_endpoint)
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
     
-    if not mrs_info:
-        return []
-        
-    return mrs_info
+    mrs = project.mergerequests.list(state=state, per_page=limit)
+    
+    return [mr.asdict() for mr in mrs]
 
 @mcp.tool()
 def search_projects(ctx: Context, project_name: str = None) -> List[Dict[str, Any]]:
@@ -358,17 +275,11 @@ def search_projects(ctx: Context, project_name: str = None) -> List[Dict[str, An
     Returns:
         A list of projects matching the search criteria.
     """
-    if project_name:
-        endpoint = f"projects?search={quote(project_name, safe='')}"
-    else:
-        endpoint = "projects"
+    gl = ctx.request_context.lifespan_context
     
-    projects_info = make_gitlab_api_request(ctx, endpoint)
+    projects = gl.projects.list(search=project_name)
     
-    if not projects_info:
-        return []
-        
-    return projects_info
+    return [p.asdict() for p in projects]
 
 if __name__ == "__main__":
     try:

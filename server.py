@@ -8,17 +8,10 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 
 # Configure logging
-log_dir = "log"
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
-
-log_file = os.path.join(log_dir, "gitlab_mcp.log")
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_file),
         logging.StreamHandler()
     ]
 )
@@ -40,7 +33,7 @@ async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[gitlab.Gitlab]:
             "Please set this in your environment or .env file."
         )
     
-    gl = gitlab.Gitlab(f"https://{host}", private_token=token)
+    gl = gitlab.Gitlab(f"https://{host}", private_token=token, timeout=120)
     try:
         logger.info("GitLab client initialized")
         yield gl
@@ -71,13 +64,93 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -
     gl = ctx.request_context.lifespan_context
     project = gl.projects.get(project_id)
     mr = project.mergerequests.get(merge_request_iid)
+
+    # 精简 merge_request 信息
+    mr_data = mr.asdict()
+    slim_mr = {
+        "id": mr_data.get("id"),
+        "iid": mr_data.get("iid"),
+        "project_id": mr_data.get("project_id"),
+        "title": mr_data.get("title"),
+        "description": mr_data.get("description"),
+        "state": mr_data.get("state"),
+        "author": mr_data.get("author", {}).get("name"),
+        "source_branch": mr_data.get("source_branch"),
+        "target_branch": mr_data.get("target_branch"),
+    }
+
+    # 获取并过滤 changes
+    original_changes_data = mr.changes()
+    all_changes = original_changes_data.get("changes", [])
     
+    # 定义要忽略的前端文件扩展名
+    frontend_extensions = {
+        '.js', '.jsx', '.ts', '.tsx', '.css', '.scss', '.less', '.html', '.vue',
+        '.svelte', '.md', '.json', '.yml', '.yaml', '.xml', '.svg', '.png', '.jpg', '.jpeg', '.gif'
+    }
+
+    filtered_changes_list = []
+    for change in all_changes:
+        file_path = change.get("new_path")
+        if not any(file_path.endswith(ext) for ext in frontend_extensions):
+            slim_change = {
+                "new_path": change.get("new_path"),
+                "old_path": change.get("old_path"),
+                "new_file": change.get("new_file"),
+                "renamed_file": change.get("renamed_file"),
+                "deleted_file": change.get("deleted_file"),
+                "diff": change.get("diff")
+            }
+            filtered_changes_list.append(slim_change)
+    
+    # 创建一个只包含必要字段的精简版 changes 对象
+    slim_changes_obj = {
+        "diff_refs": original_changes_data.get("diff_refs"),
+        "changes": filtered_changes_list
+    }
+
+    # 精简 commits
+    commits = [
+        {
+            "id": c.id,
+            "short_id": c.short_id,
+            "title": c.title,
+            "author_name": c.author_name,
+        }
+        for c in mr.commits(all=True)
+    ]
+
+    def slim_note(note):
+        if not isinstance(note, dict):
+            note = note.asdict()
+        author = note.get("author", {})
+        return {
+            "id": note.get("id"),
+            "type": note.get("type"),
+            "body": note.get("body"),
+            "system": note.get("system"),
+            "author": author.get("name"),
+            "position": note.get("position", {}),
+        }
+
+    # 精简 discussions 和其下的 notes
+    all_discussions = mr.discussions.list(all=True)
+
+    discussions = []
+    for d in all_discussions:
+        # d.attributes['notes'] 包含了该 discussion 下的所有 note 信息
+        slim_notes_list = [slim_note(n) for n in d.attributes.get('notes', [])]
+        discussions.append({
+            "id": d.id,
+            "individual_note": d.individual_note,
+            "notes": slim_notes_list
+        })
+
     return {
-        "merge_request": mr.asdict(),
-        "changes": mr.changes(),
-        "commits": [c.asdict() for c in mr.commits(all=True)],
-        "notes": [n.asdict() for n in mr.notes.list(all=True)],
-        "discussions": [d.asdict() for d in mr.discussions.list(all=True)]
+        "merge_request": slim_mr,
+        "changes": slim_changes_obj,
+        "commits": commits,
+        "discussions": discussions,
     }
 
 @mcp.tool()

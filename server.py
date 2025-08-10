@@ -8,7 +8,20 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+log_dir = "log"
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+log_file = os.path.join(log_dir, "gitlab_mcp.log")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -63,7 +76,8 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -
         "merge_request": mr.asdict(),
         "changes": mr.changes(),
         "commits": [c.asdict() for c in mr.commits(all=True)],
-        "notes": [n.asdict() for n in mr.notes.list(all=True)]
+        "notes": [n.asdict() for n in mr.notes.list(all=True)],
+        "discussions": [d.asdict() for d in mr.discussions.list(all=True)]
     }
 
 @mcp.tool()
@@ -197,9 +211,91 @@ def add_merge_request_discussion(ctx: Context, project_id: str, merge_request_ii
     project = gl.projects.get(project_id)
     mr = project.mergerequests.get(merge_request_iid)
     
-    discussion = mr.discussions.create({'body': body, 'position': position})
+    discussion_data = {'body': body, 'position': position}
+    logger.info(f"Creating discussion with data: {discussion_data}")
+    
+    try:
+        discussion = mr.discussions.create(discussion_data)
+        logger.info(f"Successfully created discussion: {discussion.id}")
+        return discussion.asdict()
+    except gitlab.exceptions.GitlabHttpError as e:
+        logger.error(f"GitLab API error while creating discussion: {e.error_message}", exc_info=True)
+        logger.error(f"Response body: {e.response_body}")
+        raise e
+
+
+@mcp.tool()
+def reply_to_merge_request_discussion(ctx: Context, project_id: str, merge_request_iid: str, discussion_id: str, body: str) -> Dict[str, Any]:
+    """
+    Reply to a merge request discussion.
+    
+    Args:
+        project_id: The GitLab project ID or URL-encoded path
+        merge_request_iid: The merge request IID (project-specific ID)
+        discussion_id: The ID of the discussion to reply to
+        body: The reply text
+    Returns:
+        Dict containing the created note information
+    """
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
+    discussion = mr.discussions.get(discussion_id)
+    
+    note = discussion.notes.create({'body': body})
+    
+    return note.asdict()
+
+
+@mcp.tool()
+def resolve_merge_request_discussion(ctx: Context, project_id: str, merge_request_iid: str, discussion_id: str, resolved: bool = True) -> Dict[str, Any]:
+    """
+    Resolve or unresolve a merge request discussion.
+    
+    Args:
+        project_id: The GitLab project ID or URL-encoded path
+        merge_request_iid: The merge request IID (project-specific ID)
+        discussion_id: The ID of the discussion
+        resolved: True to resolve, False to unresolve
+    Returns:
+        Dict containing the updated discussion information
+    """
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
+    discussion = mr.discussions.get(discussion_id)
+    
+    discussion.resolved = resolved
+    discussion.save()
     
     return discussion.asdict()
+
+
+@mcp.tool()
+def delete_merge_request_discussion(ctx: Context, project_id: str, merge_request_iid: str, discussion_id: str) -> Dict[str, Any]:
+    """
+    Delete a merge request discussion.
+    
+    Args:
+        project_id: The GitLab project ID or URL-encoded path
+        merge_request_iid: The merge request IID (project-specific ID)
+        discussion_id: The ID of the discussion to delete
+    Returns:
+        Dict containing the status of the deletion
+    """
+    gl = ctx.request_context.lifespan_context
+    project = gl.projects.get(project_id)
+    mr = project.mergerequests.get(merge_request_iid)
+    discussion = mr.discussions.get(discussion_id)
+    
+    # To delete a discussion, we delete its first note.
+    # If the discussion only has one note, the discussion will be deleted.
+    if discussion.notes:
+        first_note_id = discussion.notes[0]['id']
+        discussion.notes.delete(first_note_id)
+        return {"status": "success", "deleted_note_id": first_note_id}
+    
+    return {"status": "failed", "message": "Discussion has no notes to delete."}
 
 @mcp.tool()
 def approve_merge_request(ctx: Context, project_id: str, merge_request_iid: str, approvals_required: Optional[int] = None) -> Dict[str, Any]:

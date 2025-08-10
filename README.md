@@ -1,210 +1,120 @@
-# GitLab MCP for Code Review
+# GitLab MCP 代码审查工具
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> This project is forked from [cayirtepeomer/gerrit-code-review-mcp](https://github.com/cayirtepeomer/gerrit-code-review-mcp) and adapted for GitLab integration.
+> 本项目 fork 自 [cayirtepeomer/gerrit-code-review-mcp](https://github.com/cayirtepeomer/gerrit-code-review-mcp) 并为 GitLab 集成进行了适配。
 
-An MCP (Model Context Protocol) server for integrating AI assistants like Claude with GitLab's merge requests. This allows AI assistants to review code changes directly through the GitLab API.
+一个用于将 Claude 等 AI 助手与 GitLab 的合并请求集成的 MCP (Model Context Protocol) 服务器。这使得 AI 助手可以通过 GitLab API 直接审查代码变更。
 
-## Features
+## 功能
 
-- **Complete Merge Request Analysis**: Fetch full details about merge requests including diffs, commits, and comments
-- **File-Specific Diffs**: Analyze changes to specific files within merge requests
-- **Version Comparison**: Compare different branches, tags, or commits
-- **Review Management**: Add comments, approve, or unapprove merge requests
-- **Project Overview**: Get lists of all merge requests in a project
+- **完整的合并请求分析**: 获取合并请求的全部详情，包括差异、提交和评论
+- **文件特定的差异**: 分析合并请求中特定文件的变更
+- **版本比较**: 比较不同的分支、标签或提交
+- **审查管理**: 添加评论、批准或取消批准合并请求
+- **项目概览**: 获取项目中的所有合并请求列表
 
-## Installation
+## 安装
 
-### Prerequisites
+### 先决条件
 
-- Python 3.10+ 
-- GitLab personal access token with API scope (read_api, api)
-- [Cursor IDE](https://cursor.sh/) or [Claude Desktop App](https://claude.ai/desktop) for MCP integration
+- Python 3.10+
+- uv
+- 具有 API 范围 (read_api, api) 的 GitLab 个人访问令牌
+- 用于 MCP 集成的 [Cursor IDE](https://cursor.sh/) 或 [Claude 桌面应用](https://claude.ai/desktop)
 
-### Quick Start
+### 快速开始
 
-1. Clone this repository:
+1.  克隆此仓库：
 
-```bash
-git clone https://github.com/mehmetakinn/gitlab-mcp-code-review.git
-cd gitlab-mcp-code-review
-```
+    ```bash
+    git clone https://gitea.ffpy.site/ffpy/gitlab-mcp-code-review.git
+    cd gitlab-mcp-code-review
+    ```
 
-2. Create and activate a virtual environment:
+2.  创建并激活虚拟环境：
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
+    ```bash
+    uv venv
+    source .venv/bin/activate # 在 Windows 上: .venv\Scripts\activate
+    ```
 
-3. Install dependencies:
+3.  创建一个包含 GitLab 配置的 `.env` 文件 (查看 `.env.example` 了解所有选项)：
 
-```bash
-pip install -r requirements.txt
-```
+    ```
+    # 必需
+    GITLAB_TOKEN=your_personal_access_token_here
 
-4. Create a `.env` file with your GitLab configuration (see `.env.example` for all options):
+    # 可选设置
+    GITLAB_HOST=gitlab.com
+    GITLAB_API_VERSION=v4
+    LOG_LEVEL=INFO
+    ```
 
-```
-# Required
-GITLAB_TOKEN=your_personal_access_token_here
+## 配置选项
 
-# Optional settings
-GITLAB_HOST=gitlab.com
-GITLAB_API_VERSION=v4
-LOG_LEVEL=INFO
-```
+可以在 `.env` 文件中配置以下环境变量：
 
-## Configuration Options
+| 变量 | 必需 | 默认值 | 描述 |
+|---|---|---|---|
+| GITLAB_TOKEN | 是 | - | 你的 GitLab 个人访问令牌 |
+| GITLAB_HOST | 否 | gitlab.com | GitLab 实例主机名 |
+| GITLAB_API_VERSION | 否 | v4 | 使用的 GitLab API 版本 |
+| LOG_LEVEL | 否 | INFO | 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
+| DEBUG | 否 | false | 启用调试模式 |
+| REQUEST_TIMEOUT | 否 | 30 | API 请求超时时间（秒） |
+| MAX_RETRIES | 否 | 3 | 失败请求的最大重试次数 |
 
-The following environment variables can be configured in your `.env` file:
+## Cursor IDE 集成
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| GITLAB_TOKEN | Yes | - | Your GitLab personal access token |
-| GITLAB_HOST | No | gitlab.com | GitLab instance hostname |
-| GITLAB_API_VERSION | No | v4 | GitLab API version to use |
-| LOG_LEVEL | No | INFO | Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
-| DEBUG | No | false | Enable debug mode |
-| REQUEST_TIMEOUT | No | 30 | API request timeout in seconds |
-| MAX_RETRIES | No | 3 | Maximum retry attempts for failed requests |
-
-## Cursor IDE Integration
-
-To use this MCP with Cursor IDE, add this configuration to your `~/.cursor/mcp.json` file:
+要将此 MCP 与 Cursor IDE 一起使用，请将以下配置添加到你的 `~/.cursor/mcp.json` 文件中：
 
 ```json
 {
   "mcpServers": {
     "gitlab-mcp-code-review": {
-      "command": "/path/to/your/gitlab-mcp-code-review/.venv/bin/python",
+      "command": "uv",
       "args": [
-        "/path/to/your/gitlab-mcp-code-review/server.py",
-        "--transport",
-        "stdio"
+        "--directory",
+        "/path/to/your/gitlab-mcp-code-review",
+        "run",
+        "server.py"
       ],
-      "cwd": "/path/to/your/gitlab-mcp-code-review",
       "env": {
-        "PYTHONPATH": "/path/to/your/gitlab-mcp-code-review",
-        "VIRTUAL_ENV": "/path/to/your/gitlab-mcp-code-review/.venv",
-        "PATH": "/path/to/your/gitlab-mcp-code-review/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-      },
-      "stdio": true
+        "GITLAB_HOST": "xxx",
+        "GITLAB_TOKEN": "xxx"
+      }
     }
   }
 }
 ```
 
-Replace `/path/to/your/gitlab-mcp-code-review` with the actual path to your cloned repository.
+将 `/path/to/your/gitlab-mcp-code-review` 替换为你克隆仓库的实际路径。
 
-## Claude Desktop App Integration
+## 可用工具
 
-To use this MCP with the Claude Desktop App:
+MCP 服务器提供以下工具用于与 GitLab 交互：
 
-1. Open the Claude Desktop App
-2. Go to Settings → Advanced → MCP Configuration
-3. Add the following configuration:
+| 工具 | 描述 |
+|---|---|
+| `fetch_merge_request` | 获取有关合并请求的完整信息 |
+| `fetch_merge_request_diff` | 获取特定合并请求的差异 |
+| `fetch_commit_diff` | 获取特定提交的差异信息 |
+| `compare_versions` | 比较不同的分支、标签或提交 |
+| `add_merge_request_comment` | 向合并请求添加评论 |
+| `approve_merge_request` | 批准合并请求 |
+| `unapprove_merge_request` | 取消批准合并请求 |
+| `get_project_merge_requests` | 获取项目的合并请求列表 |
 
-```json
-{
-  "mcpServers": {
-    "gitlab-mcp-code-review": {
-      "command": "/path/to/your/gitlab-mcp-code-review/.venv/bin/python",
-      "args": [
-        "/path/to/your/gitlab-mcp-code-review/server.py",
-        "--transport",
-        "stdio"
-      ],
-      "cwd": "/path/to/your/gitlab-mcp-code-review",
-      "env": {
-        "PYTHONPATH": "/path/to/your/gitlab-mcp-code-review",
-        "VIRTUAL_ENV": "/path/to/your/gitlab-mcp-code-review/.venv",
-        "PATH": "/path/to/your/gitlab-mcp-code-review/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-      },
-      "stdio": true
-    }
-  }
-}
-```
+## 故障排除
 
-Replace `/path/to/your/gitlab-mcp-code-review` with the actual path to your cloned repository.
+如果遇到问题：
 
-## Available Tools
+1.  验证你的 GitLab 令牌是否具有适当的权限 (api, read_api)
+2.  确保你的 MCP 配置路径正确
+3.  使用以下命令测试连接：`curl -H "Private-Token: your-token" https://gitlab.com/api/v4/projects`
 
-The MCP server provides the following tools for interacting with GitLab:
+## 许可证
 
-| Tool | Description |
-|------|-------------|
-| `fetch_merge_request` | Get complete information about a merge request |
-| `fetch_merge_request_diff` | Get diffs for a specific merge request |
-| `fetch_commit_diff` | Get diff information for a specific commit |
-| `compare_versions` | Compare different branches, tags, or commits |
-| `add_merge_request_comment` | Add a comment to a merge request |
-| `approve_merge_request` | Approve a merge request |
-| `unapprove_merge_request` | Unapprove a merge request |
-| `get_project_merge_requests` | Get a list of merge requests for a project |
-
-## Usage Examples
-
-### Fetch a Merge Request
-
-```python
-# Get details of merge request #5 in project with ID 123
-mr = fetch_merge_request("123", "5")
-```
-
-### View Specific File Changes
-
-```python
-# Get diff for a specific file in a merge request
-file_diff = fetch_merge_request_diff("123", "5", "path/to/file.js")
-```
-
-### Compare Branches
-
-```python
-# Compare develop branch with master branch
-diff = compare_versions("123", "develop", "master")
-```
-
-### Add a Comment to a Merge Request
-
-```python
-# Add a comment to a merge request
-comment = add_merge_request_comment("123", "5", "This code looks good!")
-```
-
-### Approve a Merge Request
-
-```python
-# Approve a merge request and set required approvals to 2
-approval = approve_merge_request("123", "5", approvals_required=2)
-```
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. Verify your GitLab token has the appropriate permissions (api, read_api)
-2. Check your `.env` file settings
-3. Ensure your MCP configuration paths are correct
-4. Test connection with: `curl -H "Private-Token: your-token" https://gitlab.com/api/v4/projects`
-5. Set LOG_LEVEL=DEBUG in your .env file for more detailed logging
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-See the [CONTRIBUTING.md](CONTRIBUTING.md) file for more details on the development process.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+本项目根据 MIT 许可证授权 - 有关详细信息，请参阅 [LICENSE](LICENSE) 文件。

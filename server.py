@@ -196,13 +196,14 @@ def add_merge_request_discussion(ctx: Context, project_id: str, merge_request_ii
         position: Position data for the discussion.
             Example:
             {
-                "position_type": "text",
-                "base_sha": "...",
-                "start_sha": "...",
-                "head_sha": "...",
-                "old_path": "path/to/file.py",
-                "new_path": "path/to/file.py",
-                "new_line": 15
+                "position_type": "text", // Required, Type of the position reference. Allowed values: text, image, or file. file introduced in GitLab 16.4.
+                "base_sha": "...", // Required, Base commit SHA in the source branch.
+                "start_sha": "...", // Required, SHA referencing commit in target branch.
+                "head_sha": "...", // Required, SHA referencing HEAD of this merge request.
+                "old_path": "path/to/file.py", // Required, File path before change.
+                "new_path": "path/to/file.py", // Required, File path after change.
+                "new_line": 15, // For text diff notes, the line number after change.
+                "old_line": 10 // For text diff notes, the line number before change.
             }
     Returns:
         Dict containing the created discussion information

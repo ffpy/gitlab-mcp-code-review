@@ -64,9 +64,10 @@ def make_gitlab_api_request(ctx: Context, endpoint: str, method: str = "GET", da
             
     except requests.exceptions.RequestException as e:
         logger.error(f"REST request failed: {str(e)}")
-        if hasattr(e, 'response'):
+        if hasattr(e, 'response') and e.response is not None:
             logger.error(f"Response status: {e.response.status_code}")
-        raise Exception(f"Failed to make GitLab API request: {str(e)}")
+            logger.error(f"Response body: {e.response.text}")
+        return {}
 
 @asynccontextmanager
 async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[GitLabContext]:
@@ -90,7 +91,6 @@ async def gitlab_lifespan(server: FastMCP) -> AsyncIterator[GitLabContext]:
 # Create MCP server
 mcp = FastMCP(
     "GitLab MCP for Code Review",
-    description="MCP server for reviewing GitLab code changes",
     lifespan=gitlab_lifespan,
     dependencies=["python-dotenv", "requests"]
 )
@@ -221,15 +221,14 @@ def compare_versions(ctx: Context, project_id: str, from_sha: str, to_sha: str) 
     return compare_info
 
 @mcp.tool()
-def add_merge_request_comment(ctx: Context, project_id: str, merge_request_iid: str, body: str, position: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def add_merge_request_comment(ctx: Context, project_id: str, merge_request_iid: str, body: str) -> Dict[str, Any]:
     """
-    Add a comment to a merge request, optionally at a specific position in a file.
+    Add a general comment to a merge request.
     
     Args:
         project_id: The GitLab project ID or URL-encoded path
         merge_request_iid: The merge request IID (project-specific ID)
         body: The comment text
-        position: Optional position data for line comments
     Returns:
         Dict containing the created comment information
     """
@@ -237,11 +236,7 @@ def add_merge_request_comment(ctx: Context, project_id: str, merge_request_iid: 
     data = {
         "body": body
     }
-    
-    # Add position data if provided
-    if position:
-        data["position"] = position
-    
+
     # Add the comment
     comment_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/notes"
     comment_info = make_gitlab_api_request(ctx, comment_endpoint, method="POST", data=data)
@@ -250,6 +245,44 @@ def add_merge_request_comment(ctx: Context, project_id: str, merge_request_iid: 
         raise ValueError("Failed to add comment to merge request")
     
     return comment_info
+
+@mcp.tool()
+def add_merge_request_discussion(ctx: Context, project_id: str, merge_request_iid: str, body: str, position: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Add a discussion to a merge request at a specific position in a file.
+    
+    Args:
+        project_id: The GitLab project ID or URL-encoded path
+        merge_request_iid: The merge request IID (project-specific ID)
+        body: The discussion text
+        position: Position data for the discussion.
+            Example:
+            {
+                "position_type": "text",
+                "base_sha": "...",
+                "start_sha": "...",
+                "head_sha": "...",
+                "old_path": "path/to/file.py",
+                "new_path": "path/to/file.py",
+                "new_line": 15
+            }
+    Returns:
+        Dict containing the created discussion information
+    """
+    # Create the discussion data
+    data = {
+        "body": body,
+        "position": position
+    }
+    
+    # Add the discussion
+    discussion_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests/{merge_request_iid}/discussions"
+    discussion_info = make_gitlab_api_request(ctx, discussion_endpoint, method="POST", data=data)
+    
+    if not discussion_info:
+        raise ValueError("Failed to add discussion to merge request")
+    
+    return discussion_info
 
 @mcp.tool()
 def approve_merge_request(ctx: Context, project_id: str, merge_request_iid: str, approvals_required: Optional[int] = None) -> Dict[str, Any]:
@@ -310,7 +343,32 @@ def get_project_merge_requests(ctx: Context, project_id: str, state: str = "all"
     mrs_endpoint = f"projects/{quote(project_id, safe='')}/merge_requests?state={state}&per_page={limit}"
     mrs_info = make_gitlab_api_request(ctx, mrs_endpoint)
     
+    if not mrs_info:
+        return []
+        
     return mrs_info
+
+@mcp.tool()
+def search_projects(ctx: Context, project_name: str = None) -> List[Dict[str, Any]]:
+    """
+    Search for GitLab projects by name.
+
+    Args:
+        project_name: The name of the project to search for. If None, returns all projects.
+    Returns:
+        A list of projects matching the search criteria.
+    """
+    if project_name:
+        endpoint = f"projects?search={quote(project_name, safe='')}"
+    else:
+        endpoint = "projects"
+    
+    projects_info = make_gitlab_api_request(ctx, endpoint)
+    
+    if not projects_info:
+        return []
+        
+    return projects_info
 
 if __name__ == "__main__":
     try:

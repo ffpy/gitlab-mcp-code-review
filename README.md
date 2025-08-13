@@ -24,49 +24,13 @@
 - 具有 API 范围 (read_api, api) 的 GitLab 个人访问令牌
 - 用于 MCP 集成的 [Cursor IDE](https://cursor.sh/) 或 [Claude 桌面应用](https://claude.ai/desktop)
 
-### 快速开始
-
-1.  克隆此仓库：
-
-    ```bash
-    git clone https://gitea.ffpy.site/ffpy/gitlab-mcp-code-review.git
-    cd gitlab-mcp-code-review
-    ```
-
-2.  创建并激活虚拟环境：
-
-    ```bash
-    uv venv
-    source .venv/bin/activate # 在 Windows 上: .venv\Scripts\activate
-    ```
-
-3.  创建一个包含 GitLab 配置的 `.env` 文件 (查看 `.env.example` 了解所有选项)：
-
-    ```
-    # 必需
-    GITLAB_TOKEN=your_personal_access_token_here
-
-    # 可选设置
-    GITLAB_HOST=gitlab.com
-    GITLAB_API_VERSION=v4
-    LOG_LEVEL=INFO
-    ```
-
-## 配置选项
-
-可以在 `.env` 文件中配置以下环境变量：
-
-| 变量 | 必需 | 默认值 | 描述 |
-|---|---|---|---|
-| GITLAB_TOKEN | 是 | - | 你的 GitLab 个人访问令牌 |
-| GITLAB_HOST | 否 | gitlab.com | GitLab 实例主机名 |
-| GITLAB_API_VERSION | 否 | v4 | 使用的 GitLab API 版本 |
-| LOG_LEVEL | 否 | INFO | 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL) |
-| DEBUG | 否 | false | 启用调试模式 |
-| REQUEST_TIMEOUT | 否 | 30 | API 请求超时时间（秒） |
-| MAX_RETRIES | 否 | 3 | 失败请求的最大重试次数 |
-
 ## Cursor IDE 集成
+
+克隆此仓库：
+```bash
+git clone https://gitea.ffpy.site/ffpy/gitlab-mcp-code-review.git
+cd gitlab-mcp-code-review
+```
 
 要将此 MCP 与 Cursor IDE 一起使用，请将以下配置添加到你的 `~/.cursor/mcp.json` 文件中：
 
@@ -82,7 +46,7 @@
         "server.py"
       ],
       "env": {
-        "GITLAB_HOST": "xxx",
+        "GITLAB_HOST": "gitlab.com",
         "GITLAB_TOKEN": "xxx"
       }
     }
@@ -90,7 +54,9 @@
 }
 ```
 
-将 `/path/to/your/gitlab-mcp-code-review` 替换为你克隆仓库的实际路径。
+- 将 `/path/to/your/gitlab-mcp-code-review` 替换为你克隆仓库的实际路径。
+- 将 `GITLAB_HOST` 修改为你的Gitlab地址
+- 将 `GITLAB_TOKEN` 修改为你的AccessToken
 
 ## 可用工具
 
@@ -99,8 +65,6 @@ MCP 服务器提供以下工具用于与 GitLab 交互：
 | 工具 | 描述 |
 |---|---|
 | `fetch_merge_request` | 获取有关合并请求的完整信息 |
-| `fetch_merge_request_diff` | 获取特定合并请求的差异 |
-| `fetch_commit_diff` | 获取特定提交的差异信息 |
 | `compare_versions` | 比较不同的分支、标签或提交 |
 | `add_merge_request_comment` | 向合并请求添加评论 |
 | `approve_merge_request` | 批准合并请求 |

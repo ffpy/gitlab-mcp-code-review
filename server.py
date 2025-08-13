@@ -172,67 +172,6 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -
     }
 
 @mcp.tool()
-def fetch_merge_request_diff(ctx: Context, project_id: str, merge_request_iid: str, file_path: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Fetch the diff for a specific file in a merge request, or all files if none specified.
-    
-    Args:
-        project_id: The GitLab project ID or URL-encoded path
-        merge_request_iid: The merge request IID (project-specific ID)
-        file_path: Optional specific file path to get diff for
-    Returns:
-        Dict containing the diff information
-    """
-    gl = ctx.request_context.lifespan_context
-    project = gl.projects.get(project_id)
-    mr = project.mergerequests.get(merge_request_iid)
-    
-    changes = mr.changes()
-    files = changes.get("changes", [])
-    
-    if file_path:
-        files = [f for f in files if f.get("new_path") == file_path or f.get("old_path") == file_path]
-        if not files:
-            raise ValueError(f"File '{file_path}' not found in the merge request changes")
-            
-    return {
-        "merge_request_iid": merge_request_iid,
-        "files": files
-    }
-
-@mcp.tool()
-def fetch_commit_diff(ctx: Context, project_id: str, commit_sha: str, file_path: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Fetch the diff for a specific commit, or for a specific file in that commit.
-    
-    Args:
-        project_id: The GitLab project ID or URL-encoded path
-        commit_sha: The commit SHA
-        file_path: Optional specific file path to get diff for
-    Returns:
-        Dict containing the diff information
-    """
-    gl = ctx.request_context.lifespan_context
-    project = gl.projects.get(project_id)
-    commit = project.commits.get(commit_sha)
-    
-    try:
-        diff_info = commit.diff()
-    except Exception as e:
-        logger.error(f"Failed to get diff for commit {commit_sha}: {e}")
-        diff_info = []
-    
-    if file_path:
-        diff_info = [d for d in diff_info if d.get("new_path") == file_path or d.get("old_path") == file_path]
-        if not diff_info:
-            raise ValueError(f"File '{file_path}' not found in the commit diff")
-            
-    return {
-        "commit": commit.asdict(),
-        "diffs": diff_info
-    }
-
-@mcp.tool()
 def compare_versions(ctx: Context, project_id: str, from_sha: str, to_sha: str) -> Dict[str, Any]:
     """
     Compare two commits/branches/tags to see the differences between them.

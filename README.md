@@ -7,9 +7,13 @@
 
 一个用于将 Claude 等 AI 助手与 GitLab 的合并请求集成的 MCP (Model Context Protocol) 服务器。这使得 AI 助手可以通过 GitLab API 直接审查代码变更。
 
+<a href="https://glama.ai/mcp/servers/@ffpy/gitlab-mcp-code-review">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@ffpy/gitlab-mcp-code-review/badge" alt="GitLab Code Review MCP server" />
+</a>
+
 ## 功能
 
-- **完整的合并请求分析**: 获取合并请求的全部详情，包括差异、提交和评论
+- **完整的合并请求分析**: 获取合并请求的全部详情,包括差异、提交和评论
 - **文件特定的差异**: 分析合并请求中特定文件的变更
 - **版本比较**: 比较不同的分支、标签或提交
 - **审查管理**: 添加评论、批准或取消批准合并请求
@@ -32,7 +36,7 @@ git clone https://gitea.ffpy.site/ffpy/gitlab-mcp-code-review.git
 cd gitlab-mcp-code-review
 ```
 
-要将此 MCP 与 Cursor IDE 一起使用，请将以下配置添加到你的 `~/.cursor/mcp.json` 文件中：
+要将此 MCP 与 Cursor IDE 一起使用,请将以下配置添加到你的 `~/.cursor/mcp.json` 文件中：
 
 ```json
 {
@@ -81,4 +85,4 @@ MCP 服务器提供以下工具用于与 GitLab 交互：
 
 ## 许可证
 
-本项目根据 MIT 许可证授权 - 有关详细信息，请参阅 [LICENSE](LICENSE) 文件。
+本项目根据 MIT 许可证授权 - 有关详细信息,请参阅 [LICENSE](LICENSE) 文件。

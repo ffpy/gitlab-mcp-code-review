@@ -9,6 +9,8 @@ import fnmatch
 import paramiko
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 
 # Configure logging
 logging.basicConfig(
@@ -170,8 +172,45 @@ def fetch_code_review_rules(ctx: Context):
             except:
                 pass
 
+def dict_to_xml(data: Any, parent: ET.Element = None, tag: str = "item") -> ET.Element:
+    """
+    Convert a dictionary or list to XML format.
+    
+    Args:
+        data: The data to convert (dict, list, or primitive type)
+        parent: The parent XML element
+        tag: The tag name for the current element
+    Returns:
+        The XML element
+    """
+    if parent is None:
+        parent = ET.Element(tag)
+        elem = parent
+    else:
+        elem = ET.SubElement(parent, tag)
+    
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if value is not None:
+                dict_to_xml(value, elem, str(key))
+    elif isinstance(data, list):
+        for item in data:
+            dict_to_xml(item, elem, "item")
+    else:
+        elem.text = str(data) if data is not None else ""
+    
+    return parent
+
+def prettify_xml(elem: ET.Element) -> str:
+    """
+    Return a pretty-printed XML string for the Element.
+    """
+    rough_string = ET.tostring(elem, encoding='utf-8')
+    reparsed = minidom.parseString(rough_string)
+    return reparsed.toprettyxml(indent="  ", encoding='utf-8').decode('utf-8')
+
 @mcp.tool()
-def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -> Dict[str, Any]:
+def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str):
     """
     Fetch a GitLab merge request and its contents.
     
@@ -179,7 +218,7 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -
         project_id: The GitLab project ID or URL-encoded path
         merge_request_iid: The merge request IID (project-specific ID)
     Returns:
-        Dict containing the merge request information
+        XML string containing the merge request information
     """
     gl = ctx.request_context.lifespan_context
     project = gl.projects.get(project_id)
@@ -262,12 +301,20 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -
             "notes": slim_notes_list
         })
 
-    return {
+    # 构建最终的数据结构
+    result_data = {
         "merge_request": slim_mr,
         "changes": slim_changes_obj,
         "commits": commits,
         "discussions": discussions,
     }
+    
+    # 转换为XML并返回
+    root = ET.Element("merge_request_data")
+    for key, value in result_data.items():
+        dict_to_xml(value, root, key)
+    
+    return prettify_xml(root)
 
 @mcp.tool()
 def compare_versions(ctx: Context, project_id: str, from_sha: str, to_sha: str) -> Dict[str, Any]:

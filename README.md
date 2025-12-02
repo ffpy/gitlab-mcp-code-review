@@ -58,12 +58,51 @@ cd gitlab-mcp-code-review
 - 将 `GITLAB_HOST` 修改为你的Gitlab地址
 - 将 `GITLAB_TOKEN` 修改为你的AccessToken
 
+## 环境变量
+
+### 必需的环境变量
+
+- `GITLAB_HOST`: GitLab 实例的主机名（默认: gitlab.com）
+- `GITLAB_TOKEN`: GitLab 个人访问令牌（需要 api 和 read_api 权限）
+
+### 可选的环境变量（用于代码审查规范功能）
+
+如果你想使用 `fetch_code_review_rules` 工具从远程服务器获取团队的代码审查规范，需要配置以下环境变量：
+
+- `CODE_REVIEW_SSH_HOST`: SSH 服务器地址
+- `CODE_REVIEW_SSH_PORT`: SSH 端口（默认: 22）
+- `CODE_REVIEW_SSH_USERNAME`: SSH 用户名
+- `CODE_REVIEW_SSH_PASSWORD`: SSH 密码
+- `CODE_REVIEW_RULE_FILE`: 规范文件在服务器上的绝对路径（例如: /home/user/code-review-rules.md）
+
+配置示例：
+```json
+{
+  "mcpServers": {
+    "gitlab-mcp-code-review": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/your/gitlab-mcp-code-review", "run", "server.py"],
+      "env": {
+        "GITLAB_HOST": "gitlab.com",
+        "GITLAB_TOKEN": "xxx",
+        "CODE_REVIEW_SSH_HOST": "your-server.com",
+        "CODE_REVIEW_SSH_PORT": "22",
+        "CODE_REVIEW_SSH_USERNAME": "your-username",
+        "CODE_REVIEW_SSH_PASSWORD": "your-password",
+        "CODE_REVIEW_RULE_FILE": "/path/to/code-review-rules.md"
+      }
+    }
+  }
+}
+```
+
 ## 可用工具
 
 MCP 服务器提供以下工具用于与 GitLab 交互：
 
 | 工具 | 描述 |
 |---|---|
+| `fetch_code_review_rules` | 通过 SSH 获取团队的代码审查规范文件 |
 | `fetch_merge_request` | 获取有关合并请求的完整信息 |
 | `compare_versions` | 比较不同的分支、标签或提交 |
 | `add_merge_request_comment` | 向合并请求添加评论 |

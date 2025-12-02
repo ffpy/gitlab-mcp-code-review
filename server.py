@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 import gitlab
 import fnmatch
+import paramiko
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -71,6 +72,103 @@ def is_path_excluded(file_path: str, patterns: List[str]) -> bool:
         elif fnmatch.fnmatch(file_path, pattern):
             return True
     return False
+
+@mcp.tool()
+def fetch_code_review_rules(ctx: Context):
+    """
+    Fetch the team's code review rules from a remote server via SSH.
+
+    IMPORTANT: You should call this tool BEFORE reviewing any merge requests or code changes
+    to understand the team's code review standards and guidelines.
+
+    Returns:
+        str: The code review rules content on success, or a simple message if SSH is not configured
+        Dict: Error information only on connection failures
+    """
+    # Read SSH configuration from environment variables
+    ssh_host = os.getenv("CODE_REVIEW_SSH_HOST")
+    ssh_port = int(os.getenv("CODE_REVIEW_SSH_PORT", "22"))
+    ssh_username = os.getenv("CODE_REVIEW_SSH_USERNAME")
+    ssh_password = os.getenv("CODE_REVIEW_SSH_PASSWORD")
+    rule_file = os.getenv("CODE_REVIEW_RULE_FILE")
+
+    # Check if SSH configuration is provided
+    if not all([ssh_host, ssh_username, ssh_password, rule_file]):
+        return "代码审查规则未配置。如需使用团队的代码审查规范,请配置SSH相关环境变量(CODE_REVIEW_SSH_HOST, CODE_REVIEW_SSH_USERNAME, CODE_REVIEW_SSH_PASSWORD, CODE_REVIEW_RULE_FILE)。"
+
+    ssh_client = None
+    sftp_client = None
+
+    try:
+        # Create SSH client
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        logger.info(f"Connecting to SSH server {ssh_host}:{ssh_port} as {ssh_username}")
+
+        # Connect to the remote server
+        ssh_client.connect(
+            hostname=ssh_host,
+            port=ssh_port,
+            username=ssh_username,
+            password=ssh_password,
+            timeout=30
+        )
+
+        # Open SFTP session
+        sftp_client = ssh_client.open_sftp()
+
+        logger.info(f"Reading code review rules from {rule_file}")
+
+        # Read the file content
+        with sftp_client.file(rule_file, 'r') as remote_file:
+            content = remote_file.read().decode('utf-8')
+
+        logger.info(f"Successfully fetched code review rules ({len(content)} characters)")
+
+        # Return the content directly as a string on success
+        return content
+
+    except paramiko.AuthenticationException:
+        logger.error(f"SSH authentication failed for {ssh_username}@{ssh_host}")
+        return {
+            "success": False,
+            "error": "Authentication failed",
+            "message": "Failed to authenticate with the SSH server. Please check your username and password."
+        }
+    except paramiko.SSHException as e:
+        logger.error(f"SSH connection error: {e}")
+        return {
+            "success": False,
+            "error": "SSH connection error",
+            "message": f"Failed to connect to SSH server: {str(e)}"
+        }
+    except FileNotFoundError:
+        logger.error(f"File not found: {rule_file}")
+        return {
+            "success": False,
+            "error": "File not found",
+            "message": f"The code review rules file '{rule_file}' does not exist on the server."
+        }
+    except Exception as e:
+        logger.error(f"Error fetching code review rules: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": "Unexpected error",
+            "message": f"An error occurred while fetching code review rules: {str(e)}"
+        }
+    finally:
+        # Clean up connections
+        if sftp_client:
+            try:
+                sftp_client.close()
+            except:
+                pass
+        if ssh_client:
+            try:
+                ssh_client.close()
+            except:
+                pass
 
 @mcp.tool()
 def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str) -> Dict[str, Any]:
@@ -403,9 +501,9 @@ def search_projects(ctx: Context, project_name: str = None) -> List[Dict[str, An
         A list of projects matching the search criteria.
     """
     gl = ctx.request_context.lifespan_context
-    
+
     projects = gl.projects.list(search=project_name)
-    
+
     return [p.asdict() for p in projects]
 
 if __name__ == "__main__":

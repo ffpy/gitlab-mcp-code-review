@@ -9,8 +9,6 @@ import fnmatch
 import paramiko
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
 
 # Configure logging
 logging.basicConfig(
@@ -172,42 +170,43 @@ def fetch_code_review_rules(ctx: Context):
             except:
                 pass
 
-def dict_to_xml(data: Any, parent: ET.Element = None, tag: str = "item") -> ET.Element:
+def dict_to_xml_string(data: Any, tag: str = "item", indent: int = 0) -> str:
     """
-    Convert a dictionary or list to XML format.
+    Convert a dictionary or list to XML string format without escaping any characters.
+    This output is intended for AI consumption, not for XML parser.
     
     Args:
         data: The data to convert (dict, list, or primitive type)
-        parent: The parent XML element
         tag: The tag name for the current element
+        indent: Current indentation level
     Returns:
-        The XML element
+        The XML string
     """
-    if parent is None:
-        parent = ET.Element(tag)
-        elem = parent
-    else:
-        elem = ET.SubElement(parent, tag)
+    indent_str = "  " * indent
+    result = []
     
     if isinstance(data, dict):
+        result.append(f"{indent_str}<{tag}>\n")
         for key, value in data.items():
             if value is not None:
-                dict_to_xml(value, elem, str(key))
+                result.append(dict_to_xml_string(value, str(key), indent + 1))
+        result.append(f"{indent_str}</{tag}>\n")
     elif isinstance(data, list):
+        result.append(f"{indent_str}<{tag}>\n")
         for item in data:
-            dict_to_xml(item, elem, "item")
+            result.append(dict_to_xml_string(item, "item", indent + 1))
+        result.append(f"{indent_str}</{tag}>\n")
     else:
-        elem.text = str(data) if data is not None else ""
+        # Leaf node with text content - no escaping
+        if data is None:
+            text = ""
+        elif isinstance(data, bool):
+            text = "true" if data else "false"
+        else:
+            text = str(data)
+        result.append(f"{indent_str}<{tag}>{text}</{tag}>\n")
     
-    return parent
-
-def prettify_xml(elem: ET.Element) -> str:
-    """
-    Return a pretty-printed XML string for the Element.
-    """
-    rough_string = ET.tostring(elem, encoding='utf-8')
-    reparsed = minidom.parseString(rough_string)
-    return reparsed.toprettyxml(indent="  ", encoding='utf-8').decode('utf-8')
+    return "".join(result)
 
 @mcp.tool()
 def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str):
@@ -310,11 +309,12 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str):
     }
     
     # 转换为XML并返回
-    root = ET.Element("merge_request_data")
+    xml_parts = ['<?xml version="1.0" encoding="utf-8"?>\n<merge_request_data>\n']
     for key, value in result_data.items():
-        dict_to_xml(value, root, key)
+        xml_parts.append(dict_to_xml_string(value, key, 1))
+    xml_parts.append('</merge_request_data>\n')
     
-    return prettify_xml(root)
+    return "".join(xml_parts)
 
 @mcp.tool()
 def compare_versions(ctx: Context, project_id: str, from_sha: str, to_sha: str) -> Dict[str, Any]:

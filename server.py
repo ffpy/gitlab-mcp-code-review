@@ -213,6 +213,9 @@ def fetch_merge_request(ctx: Context, project_id: str, merge_request_iid: str):
     """
     Fetch a GitLab merge request and its contents.
     
+    IMPORTANT: You MUST call fetch_code_review_rules BEFORE using this tool to understand 
+    the team's code review standards and guidelines.
+    
     Args:
         project_id: The GitLab project ID or URL-encoded path
         merge_request_iid: The merge request IID (project-specific ID)
